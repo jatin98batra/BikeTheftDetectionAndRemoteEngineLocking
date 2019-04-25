@@ -147,7 +147,7 @@ void checkRing(char * lrec)
   if(strncmp("RING\r\n",lrec,6) == 0)
   {
     Serial.println("Call Detected");
-    if(strncmp("+917988151747",lrec+16,13)==0)
+    if(strncmp("+91XXXXXXXXXX",lrec+16,13)==0)
     {
       Serial.println("User Calling");
       Serial.println("Initiating Engine Locking");
