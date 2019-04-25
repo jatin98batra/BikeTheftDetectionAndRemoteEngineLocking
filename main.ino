@@ -3,10 +3,31 @@
  * The code is published under GPL License feel free to edit anything
  * github: @jatin98batra
  */
+
+/*
+ * 1.If theft isn't detected and
+ * a) the user calls: Engine will be locked if it was unlocked or vice versa
+ * 
+ * 2.If theft is detected and message is sent to user and
+ * a) user didn't called: the service willl be activated and engine will be locked if it was unlocked before
+ * b) user did called: the service will not be activated the engine state will be left untouched .
+ * 
+ * 3.Optional(Temprature Sensor)
+ * a)If temp rose above a certain level this will automatically start sending cautionary messages
+ */
+
+
 #include<SoftwareSerial.h>
+#define engineLocked 0
+#define engineUnlocked 1
+#define theftDetected 1
+#define theftUndetected 0
 SoftwareSerial GSM_MOD(10,11); //RX,TX
 char rec[150];
 int i;
+//////States///////
+int engineState=engineUnlocked; //Inital state of the engine is being unlocked
+int theftState=theftUndetected;  //Intial state of the vehicle being attcked is 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
@@ -24,6 +45,7 @@ void setup() {
     if(ret == 1 )
      {
       Serial.println("It works!");
+      Serial.println("---------------------------------------");
       delay(15);
       break;
       }
@@ -31,6 +53,7 @@ void setup() {
       {
       Serial.println("Device Not Ready");    
       Serial.println("Retrying... in 1 Sec..");
+      Serial.println("---------------------------------------");
       delay(1000);
       continue;
       }
@@ -38,31 +61,22 @@ void setup() {
   /*To clean the USART Buffer*/
   recData(rec); 
   cleanString(rec);
-
+theftState=theftDetected;
 }
-
 
 void loop() {
 
   if(GSM_MOD.available()>1)
   {
     recData(rec);
-//    printData();
     checkRing(rec);
     cleanString(rec);
     delay(1000);
-    
         
   }
 
  
 }
-
-
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -85,9 +99,7 @@ void loop() {
            if(GSM_MOD.available()>0)
            dataLeft=true;
            else
-           dataLeft=false;  
-
-          
+           dataLeft=false;           
         }
       }
 }
@@ -112,7 +124,6 @@ void printData()
     
   }
 }
-
 
 void cleanString(char* lrec)
 {
@@ -147,15 +158,48 @@ void checkRing(char * lrec)
   if(strncmp("RING\r\n",lrec,6) == 0)
   {
     Serial.println("Call Detected");
-    if(strncmp("+91XXXXXXXXXX",lrec+16,13)==0)
+    if(strncmp("+917988151747",lrec+16,13)==0)
     {
       Serial.println("User Calling");
-      Serial.println("Initiating Engine Locking");
-        
+      if(engineState == engineUnlocked)
+      {
+           if(theftState == theftUndetected)
+           {
+              Serial.println("Initiating Engine Locking");
+              Serial.println("---------------------------------------");
+              engineState=engineLocked;
+           }
+           else //user movement detected as intruder activity
+           {
+               Serial.println("Cancelling the services...Keeping the engine as it is");
+               Serial.println("---------------------------------------");
+               engineState=engineState;
+               theftState=theftUndetected; //Resetting
+           }
+      }
+      else //locked engine state
+      {
+           if(theftState == theftUndetected)
+           {
+              Serial.println("Initiating Engine Unlocking");
+              Serial.println("---------------------------------------");
+              engineState=engineUnlocked;
+           }
+           else //user movement detected as intruder activity
+           {
+               Serial.println("Cancelling the services...Keeping the engine as it is");
+               Serial.println("---------------------------------------");
+               engineState=engineState;
+               theftState=theftUndetected; //Resetting
+           } 
+            
+      } 
+      
     }
     else
     {
       Serial.println("Call from unknown source.. no action taken"); 
+      Serial.println("---------------------------------------");
       
     }
     GSM_MOD.write("ATH\r\n");  
