@@ -22,12 +22,14 @@
 #define engineUnlocked 1
 #define theftDetected 1
 #define theftUndetected 0
-  
+#define serviceAlertActive 1
+#define serviceAlertDeactive 0  
 SoftwareSerial GSM_MOD(10,11); //RX,TX
 char rec[150];
 //////States///////
 int engineState=engineUnlocked; //Inital state of the engine is being unlocked
 int theftState=theftUndetected;  //Intial state of the vehicle being attcked is 
+int serviceAlertState=serviceAlertDeactive;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
@@ -39,38 +41,34 @@ void setup() {
   checkModule();
   /*To clean the USART Buffer*/
   recData(rec); 
+  setMode(); 
+  checkModule();
   cleanString(rec);
-theftState=theftDetected;
-setMode(); 
 }
 
 void loop() {
-
-if(digitalRead(2) == LOW)
-{
-  checkModule();
-  serviceAlert();
-      
+  if(GSM_MOD.available()>1)
+  {
+     recData(rec);
+     if(checkRing(rec)==1)
+     {
+        sendState(); 
+     }
+  }
+  if(digitalRead(2) == LOW)
+  {
+      theftState=theftDetected;
+      serviceAlertState=serviceAlertActive;
+      checkModule();
+      sendFirstAlert();
+      while(serviceAlertState == serviceAlertActive)
+    {   serviceAlert();
+        checkRing(rec); 
+    }
+    
+  }
+  
 }
-
-
-//  if(GSM_MOD.available()>1)
-//  {
-//    recData(rec);
-//    checkRing(rec);
-//    //cleanString(rec);
-//    delay(1000);
-//        
-//  }
-//  setMode();  
-//  checkModule();
-//  sendFirstAlert();
-//  checkModule();
-//  while(1);
-
- 
-}
-
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -88,6 +86,7 @@ if(digitalRead(2) == LOW)
         while(dataLeft)
         {
            lrec[i]=GSM_MOD.read();
+           delay(2);
            i++;
            if(GSM_MOD.available()>0)
            dataLeft=true;
@@ -102,11 +101,11 @@ void printData()
   for(i=0;i<40;i++)
   {
 //      
-//      Serial.print(i);
-//      Serial.print("=");
-//      Serial.print(rec[i]);  
-//      Serial.print("\n");
-      Serial.print(rec[i]);
+      Serial.print(i);
+      Serial.print("=");
+      Serial.print(rec[i]);  
+      Serial.print("\n");
+//        Serial.print(rec[i]);
      
   }
 }
@@ -139,20 +138,28 @@ void checkModule()
   if(strncmp(rec,"AT\r\n\r\nOK\r\n",10) == 0)
     {Serial.println("It works");Serial.println("---------------------------------------");break;}    
   else
-  {Serial.println("Retrying.... 1 Second Later...");delay(1000);continue;}
+    {Serial.println("Retrying.... 1 Second Later...");delay(1000);continue;}
     
   }
 }
 
 
-void checkRing(char * lrec)
+int checkRing(char * lrec)
 {
-  if(strncmp("RING\r\n",lrec,6) == 0)
+   int returnValue=0;
+  //printData();
+  if((strncmp("\r\nRING\r\n",lrec,8) == 0)) 
   {
+   
+    /*For The stable Read*/
+    delay(2000);
+    cleanString(rec);
+    recData(rec);
     Serial.println("Call Detected");
-    if(strncmp("+917988151747",lrec+16,13)==0)
+    if(strncmp("+917988151747",lrec+10,13)==0)
     {
       Serial.println("User Calling");
+      returnValue=1;
       if(engineState == engineUnlocked)
       {
            if(theftState == theftUndetected)
@@ -167,6 +174,7 @@ void checkRing(char * lrec)
                Serial.println("---------------------------------------");
                engineState=engineState;
                theftState=theftUndetected; //Resetting
+               serviceAlertState=serviceAlertDeactive;
            }
       }
       else //locked engine state
@@ -183,6 +191,7 @@ void checkRing(char * lrec)
                Serial.println("---------------------------------------");
                engineState=engineState;
                theftState=theftUndetected; //Resetting
+               serviceAlertState=serviceAlertDeactive;
            } 
             
       } 
@@ -192,11 +201,16 @@ void checkRing(char * lrec)
     {
       Serial.println("Call from unknown source.. no action taken"); 
       Serial.println("---------------------------------------");
-      
+      returnValue=0;
     }
+    delay(100);
     GSM_MOD.write("ATH\r\n");  
     delay(1000);
+    recData(rec);
+    cleanString(rec); ///cleaning
+    checkModule();
   }
+  return returnValue;
 }
 
 void setMode()
@@ -221,20 +235,23 @@ void setMode()
 void sendFirstAlert()
 {
   while(1)
-  {
-    GSM_MOD.write("AT+CMGS=\"+917988151747\"\r\n");
-    delay(1000) ;
-    recData(rec);
-    printData();
-    if(strncmp(rec,"AT+CMGS=\"+917988151747\"\r\n\r\n>",28) == 0)
-    {Serial.println("SendingData...");Serial.println("---------------------------------------"); delay(1000); break;}
-    else
-    {Serial.println("Failed...Retrying");delay(1000);continue;}
-  }
+    {
+      GSM_MOD.write("AT+CMGS=\"+917988151747\"\r\n");
+      delay(1000) ;
+      recData(rec);
+//      printData();
+      if(strncmp(rec,"AT+CMGS=\"+917988151747\"\r\n\r\n>",28) == 0)
+      {Serial.println("SendingData...");Serial.println("---------------------------------------"); delay(1000); break;}
+      else
+      {Serial.println("Failed...Retrying");delay(1000);continue;}
+    }
     GSM_MOD.write("Someone entered your car.Was it you? If yes then call on the registered number otherwise *theftService* will be activated");
     delay(2000);
     GSM_MOD.write(0x1a);
-    delay(1000);
+    delay(3000);
+    recData(rec);//cleaning
+    cleanString(rec);
+    checkModule();
   }
 
 
@@ -242,17 +259,17 @@ void sendFirstAlert()
   
 void serviceAlert()
 {
-  while(1)
-  {
-    GSM_MOD.write("AT+CMGS=\"+917988151747\"\r\n");
-    delay(1000) ;
-    recData(rec);
-    printData();
-    if(strncmp(rec,"AT+CMGS=\"+917988151747\"\r\n\r\n>",28) == 0)
-    {Serial.println("SendingData...");Serial.println("---------------------------------------"); delay(1000); break;}
-    else
-    {Serial.println("Failed...Retrying");delay(1000);continue;}
-  }
+    while(1)
+    {
+      GSM_MOD.write("AT+CMGS=\"+917988151747\"\r\n");
+      delay(1000) ;
+      recData(rec);
+      //printData();
+      if(strncmp(rec,"AT+CMGS=\"+917988151747\"\r\n\r\n>",28) == 0)
+      {Serial.println("SendingData...");Serial.println("---------------------------------------"); delay(1000); break;}
+      else
+      {Serial.println("Failed...Retrying");delay(1000);continue;}
+    }
     GSM_MOD.write("CAR's Engine:");
     delay(1000);
     engineState?GSM_MOD.write("Unlocked\n"):GSM_MOD.write("Locked\n");
@@ -260,6 +277,37 @@ void serviceAlert()
     GSM_MOD.write("CAR's Position:41(deg)24'12.2\"N-21(deg)23'166.2\"E\n");
     delay(1000);
     GSM_MOD.write("Call to stop this service!");
-    GSM_MOD.write(0x1a);
     delay(1000);
+    GSM_MOD.write(0x1a);
+    delay(5000);
+    checkModule();
+  }
+
+
+
+
+
+
+void sendState()
+{
+    while(1)
+    {
+      GSM_MOD.write("AT+CMGS=\"+917988151747\"\r\n");
+      delay(1000) ;
+      recData(rec);
+//      printData();
+      if(strncmp(rec,"AT+CMGS=\"+917988151747\"\r\n\r\n>",28) == 0)
+      {Serial.println("SendingData...");Serial.println("---------------------------------------"); delay(1000); break;}
+      else
+      {Serial.println("Failed...Retrying");delay(1000);continue;}
+    }
+    GSM_MOD.write("CAR's Engine:");
+    delay(1000);
+    engineState?GSM_MOD.write("Unlocked\n"):GSM_MOD.write("Locked\n");
+    delay(1000);
+    GSM_MOD.write(0x1a);
+    delay(3000);
+    recData(rec);
+    cleanString(rec);
+    checkModule();
   }
