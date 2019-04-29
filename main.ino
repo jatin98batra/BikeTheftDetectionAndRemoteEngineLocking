@@ -24,16 +24,26 @@
 #define theftUndetected 0
 #define serviceAlertActive 1
 #define serviceAlertDeactive 0
+#define bulb1 A5
+#define bulb2 A4
+#define pump A3
+#define lock 3
+#define ignition 2
 SoftwareSerial GSM_MOD(10, 11); //RX,TX
 char rec[150];
 //////States///////
-int engineState = engineUnlocked; //Inital state of the engine is being unlocked
+int engineState = engineLocked; //Inital state of the engine is being locked
 int theftState = theftUndetected; //Intial state of the vehicle being attcked is
 int serviceAlertState = serviceAlertDeactive;
+int onceEntered = 0;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
-  pinMode(2, INPUT_PULLUP);
+  pinMode(lock, INPUT_PULLUP);
+  pinMode(ignition, INPUT_PULLUP);
+  pinMode(bulb1, OUTPUT);
+  pinMode(bulb2, OUTPUT);
+  pinMode(pump, OUTPUT);
   GSM_MOD.begin(9600);
   Serial.begin(9600);
   int ret;
@@ -44,9 +54,11 @@ void setup() {
   setMode();
   checkModule();
   cleanString(rec);
+  reflect();
 }
 
 void loop() {
+
   if (GSM_MOD.available() > 1)
   {
     recData(rec);
@@ -55,53 +67,42 @@ void loop() {
       sendState();
     }
   }
-  if (digitalRead(2) == LOW)
+
+  if ((digitalRead(lock) == LOW) && (onceEntered == 0))
   {
-    double startTime,currentTime;
-    theftState = theftDetected;
-    engineState= engineLocked;
-    serviceAlertState = serviceAlertActive;
-    checkModule();
-    sendFirstAlert();
-    currentTime=startTime = millis();
-    
-    Serial.println("Now Polling");
-    while ((currentTime - startTime) < 60000) //poll for 1 mins
+
+    intruderDetected();
+    onceEntered = 1;
+
+  }
+
+  if ((digitalRead(lock) == HIGH) && (digitalRead(ignition) == HIGH))
+  {
+    delay(500); //debounce
+    if (digitalRead(ignition) == LOW)
+      goto Routine;
+    if ((digitalRead(lock) == HIGH) && (digitalRead(ignition) == HIGH))
     {
-      if (GSM_MOD.available() > 1)
-      {
-        recData(rec);
-        if (checkRing(rec) == 1)
-        {
-          sendCancelService();
-          serviceAlertState = serviceAlertDeactive;
-          theftState = theftUndetected;
-          break; //immideatly break
-        }
-      }
-      currentTime=millis();
-    }
-    Serial.println("Polling Done !");
-    while (serviceAlertState == serviceAlertActive)
-    { serviceAlert();
-      currentTime=startTime=millis();
-      Serial.println("Now Polling Again");
-      while ((currentTime - startTime) < 60000) //poll for 1 mins
-      {
-        if (GSM_MOD.available() > 1)
-        {
-          recData(rec);
-          if (checkRing(rec) == 1)
-          {
-            sendCancelService();
-          }
-        }
-       currentTime=millis(); 
-      }
+      onceEntered = 0; //car reset
+      engineState = engineLocked;
+      reflect();
     }
 
   }
+Routine:
+  if ((engineState == engineUnlocked) && (digitalRead(ignition) == LOW))
+    carRoutine();
+
+
+
+
 }
+
+
+
+
+
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -153,6 +154,106 @@ void cleanString(char* lrec)
   }
 
 }
+
+
+int intruderDetected()
+{
+  double startTime, currentTime;
+  Serial.println("Unlocked");
+  currentTime = startTime = millis();
+  Serial.println("Expecting a call under 1 min(s)");
+  while ((currentTime - startTime < 60000)) //wait for 1 mins and not ignited
+  {
+    if (GSM_MOD.available() > 1)
+    {
+      recData(rec);
+      if (checkRing(rec) == 1)
+      {
+        sendWelcome();
+        return 0;
+      }
+    }
+    currentTime = millis();
+  }
+
+
+  theftState = theftDetected;
+  engineState = engineLocked;
+  reflect();
+  serviceAlertState = serviceAlertActive;
+  checkModule();
+  sendFirstAlert();
+  currentTime = startTime = millis();
+
+  Serial.println("Now Polling");
+  while ((currentTime - startTime) < 60000) //poll for 1 mins
+  {
+    if (GSM_MOD.available() > 1)
+    {
+      recData(rec);
+      if (checkRing(rec) == 1)
+      {
+        sendCancelService();
+        serviceAlertState = serviceAlertDeactive;
+        theftState = theftUndetected;
+        break; //immideatly break
+      }
+    }
+    currentTime = millis();
+  }
+  Serial.println("Polling Done !");
+  while (serviceAlertState == serviceAlertActive)
+  { serviceAlert();
+    currentTime = startTime = millis();
+    Serial.println("Now Polling Again");
+    while ((currentTime - startTime) < 60000) //poll for 2 mins
+    {
+      if (GSM_MOD.available() > 1)
+      {
+        recData(rec);
+        if (checkRing(rec) == 1)
+        {
+          sendCancelService();
+          serviceAlertState = serviceAlertDeactive;
+        }
+      }
+      currentTime = millis();
+    }
+  }
+  return 1;
+}
+
+
+
+void reflect()
+{
+
+  if (engineState == engineLocked)
+    digitalWrite(bulb1, LOW);
+  else
+    digitalWrite(bulb1, HIGH);
+
+
+}
+
+
+int carRoutine()
+{
+
+  if (engineState == engineUnlocked)
+  {
+    digitalWrite(bulb2, HIGH);
+    digitalWrite(pump, HIGH);
+    delay(1000);
+    digitalWrite(bulb2, LOW);
+    digitalWrite(pump, LOW);
+    delay(1000);
+  }
+
+
+
+}
+
 
 ////////////////////////////////////////////////////////////Commands/////////////////////////////////////////////////////
 void checkModule()
@@ -208,6 +309,7 @@ int checkRing(char * lrec)
           Serial.println("Initiating Engine Locking");
           Serial.println("---------------------------------------");
           engineState = engineLocked;
+          reflect();
         }
         else //user movement detected as intruder activity
         {
@@ -216,6 +318,7 @@ int checkRing(char * lrec)
           engineState = engineState;
           theftState = theftUndetected; //Resetting
           serviceAlertState = serviceAlertDeactive;
+          reflect();
         }
       }
       else //locked engine state
@@ -225,6 +328,7 @@ int checkRing(char * lrec)
           Serial.println("Initiating Engine Unlocking");
           Serial.println("---------------------------------------");
           engineState = engineUnlocked;
+          reflect();
         }
         else //user movement detected as intruder activity
         {
@@ -233,6 +337,7 @@ int checkRing(char * lrec)
           engineState = engineState;
           theftState = theftUndetected; //Resetting
           serviceAlertState = serviceAlertDeactive;
+          reflect();
         }
 
       }
@@ -406,6 +511,38 @@ void sendCancelService()
   engineState ? GSM_MOD.write("Unlocked\n") : GSM_MOD.write("Locked,Call again to Unlock It\n");
   delay(1000);
   GSM_MOD.write("Service Cancelled");
+  GSM_MOD.write(0x1a);
+  delay(3000);
+  recData(rec);
+  cleanString(rec);
+  checkModule();
+}
+
+
+void sendWelcome()
+{
+  while (1)
+  {
+    GSM_MOD.write("AT+CMGS=\"+917988151747\"\r\n");
+    delay(1000) ;
+    recData(rec);
+    //      printData();
+    if (strncmp(rec, "AT+CMGS=\"+917988151747\"\r\n\r\n>", 28) == 0)
+    {
+      Serial.println("SendingData...");
+      Serial.println("---------------------------------------");
+      delay(1000);
+      break;
+    }
+    else
+    {
+      Serial.println("Failed...Retrying");
+      delay(1000);
+      continue;
+    }
+  }
+  GSM_MOD.write("Welcome User");
+  delay(1000);
   GSM_MOD.write(0x1a);
   delay(3000);
   recData(rec);
